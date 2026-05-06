@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="./css/main.css?ver=8" rel="stylesheet">
+  <link rel="shortcut icon" href="./img/favicon.ico">
+  <title>中日辞書 北辞郎</title>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2401283801820344"
+     crossorigin="anonymous"></script>
+</head>
+
+<body x-data="dictApp()" x-init="init()">
+<header class="topbar">
+  <div class="inner">
+    <div class="brand">北辞郎</div>
+    <nav class="nav" aria-label="Primary">
+      <a href="./index.html">Home</a>
+      <a href="#" @click.prevent="showAbout = true">About</a>
+      <a href="mailto:ctrans@gmail.com">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="logo">
+      <a href="index.html"><img src="img/logo2.png" alt="北辞郎 ロゴ" onerror="this.style.display='none'"></a>
+    </div>
+
+    <div class="searchbox">
+      <form @submit.prevent="search(1)" class="row" autocomplete="off">
+        <input
+          type="text"
+          placeholder="検索語句を入力"
+          x-model.trim="word"
+        />
+
+        <select x-model="option">
+          <option value="fw">中国語前方一致（fw）</option>
+          <option value="py">ピンイン検索（py）</option>
+          <option value="jp">日本語検索（jp）</option>
+          <option value="ex">中国語完全一致（ex）</option>
+          <option value="ch">中国語全文検索（ch）</option>
+          <option value="bw">中国語後方一致（bw）</option>
+        </select>
+
+        <button type="submit" :disabled="loading || word.length===0">
+          <span x-show="!loading">Search</span>
+          <span x-show="loading">Searching…</span>
+        </button>
+      </form>
+
+      <div class="hint">
+        <div>例：北京 / 发展 / po4</div>
+        <div x-text="lastInfo"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="results" aria-live="polite" @click="onResultClick($event)">
+    <template x-if="error">
+      <div class="status" style="color:#b00020;" x-text="error"></div>
+    </template>
+
+    <div class="status" x-show="status" x-text="status"></div>
+
+    <div class="list" x-show="items.length">
+      <template x-for="(it, idx) in items" :key="it.key">
+        <div class="item">
+          <div class="head">
+            <div class="word" x-text="it.chn"></div>
+            <div class="meta" x-text="it.pyn"></div>
+          </div>
+          <div class="def" x-html="it.jpnHtml"></div>
+        </div>
+      </template>
+    </div>
+
+    <div class="status" x-show="!loading && !error && items.length===0 && searched">
+      見つかりませんでした。
+    </div>
+
+    <div class="pager" x-show="pages > 1">
+      <button class="btn" @click="search(page-1)" :disabled="loading || page<=1">← 前</button>
+      <div class="status" style="margin:0;" x-text="`Page ${page} / ${pages}（total ${total}）`"></div>
+      <button class="btn" @click="search(page+1)" :disabled="loading || page>=pages">次 →</button>
+    </div>
+  </section>
+
+<!-- About Modal -->
+<div x-show="showAbout"
+     x-transition
+     @keydown.escape.window="showAbout=false"
+     class="modal-backdrop">
+
+  <div class="modal">
+    <button class="close" @click="showAbout=false">×</button>
+    <h2>このサイトについて</h2>
+    <p>
+      このサイトは、中日辞書「北辞郎」の
+      <strong>サテライトサイト</strong>です。
+    </p>
+    <ul>
+      <li>障害時・混雑時の代替アクセス用に設けられています</li>
+      <li>検索専用で軽快に動作します</li>
+      <li>本サイトとはタイムラグがあります</li>
+    </ul>
+    <p class="link">
+      <a href="https://www.ctrans.org/" target="_blank" rel="noopener">
+        北辞郎 本サイトへ
+      </a>
+    </p>
+  </div>
+</div>
+
+</main>
+
+<footer>
+  <div x-data="{ year: new Date().getFullYear() }">Copyright © 2005-<span x-text="year"></span> 辞典幇</div>
+  <div>お問い合わせは ctrans [at] gmail dot com まで</div>
+</footer>
+
+<script type="module">
+  import { prettifyJpnToHtml } from './jpn_parser.js';
+  window.prettifyJpnToHtml = prettifyJpnToHtml; // Alpine から呼ぶ
+</script>
+
+<script>
+  function dictApp(){
+    return {
+      // API（指定どおり）
+      API_ENDPOINT: "https://uneri.org/kj/kapi.php",
+
+      word: "",
+      option: "fw",
+
+      items: [],
+      loading: false,
+      error: "",
+      status: "",
+      searched: false,
+      showAbout: false,
+
+      page: 1,
+      pages: 1,
+      total: 0,
+
+      lastInfo: "",
+
+      init(){
+        // ?word=...&option=...&page=... で復元
+        const url = new URL(location.href);
+        const w = url.searchParams.get("word");
+        const opt = url.searchParams.get("option");        
+        const p0 = parseInt(url.searchParams.get("page") || "0", 10);
+
+        if (w) this.word = w;
+        if (opt) this.option = opt;        
+        if (Number.isFinite(p0) && p0 >= 0) this.page = p0 + 1;
+        
+        // ★ 戻る／進む対応
+        window.addEventListener("popstate", () => {
+            this.restoreFromUrl();
+        });
+
+        //if (this.word) this.search(this.page);
+        if (this.word) {
+          this.search(this.page, { push: false });
+        }
+      },
+
+      restoreFromUrl(){
+        const url = new URL(location.href);
+        const w = url.searchParams.get("word") || "";
+        const opt = url.searchParams.get("option") || "fw";
+        const p0 = parseInt(url.searchParams.get("page") || "0", 10);
+
+        this.word = w;
+        this.option = opt;
+
+        const uiPage = (Number.isFinite(p0) && p0 >= 0) ? (p0 + 1) : 1;
+
+        if (this.word){
+          this.search(uiPage, { push: false });
+        }
+      },
+
+      // 表示用整形
+      prettifyJpn(s){
+        return window.prettifyJpnToHtml ? window.prettifyJpnToHtml(s) : "";
+      },
+      // リンク記法対応
+      onResultClick(ev){
+        const t = ev.target;
+        if (t?.classList?.contains("click")){
+          const w = (t.textContent || "").trim();
+          if (w){
+            this.word = w;
+            //this.search(1);
+            this.search(1, { push: true })
+          }
+        }
+      },
+
+      async search(nextPage, { push = true } = {}){
+        this.error = "";
+        this.status = "";
+        this.items = [];
+        this.searched = true;
+
+        if (!this.word) return;
+
+        // ページ範囲補正
+        if (!Number.isFinite(nextPage) || nextPage < 1) nextPage = 1;
+
+        this.loading = true;
+        const t0 = performance.now();
+
+        try{
+          const u = new URL(this.API_ENDPOINT);
+          u.searchParams.set("mode", "search");
+          u.searchParams.set("word", this.word);
+          u.searchParams.set("option", this.option);
+          u.searchParams.set("page", String(nextPage - 1)); // APIが未対応なら無視されます
+
+
+          const res = await fetch(u.toString(), { method: "GET" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+          const data = await res.json();
+
+          if (data.success !== true) {
+            throw new Error("API returned success=false");
+          }
+
+          // JSON仕様：success/page/pages/total/data[] で来る :contentReference[oaicite:1]{index=1}
+          const apiPage = Number(data.page ?? (nextPage - 1));
+          this.page = apiPage + 1;
+          //this.page  = Number(data.page ?? nextPage) || nextPage;
+          this.pages = Number(data.pages ?? 1) || 1;
+          this.total = Number(data.total ?? 0) || 0;
+
+          const list = Array.isArray(data.data) ? data.data : [];
+          this.items = list.map((x, i) => ({
+            key: `${this.page}-${i}-${x.chn ?? ""}`,
+            chn: x.chn ?? "",
+            pyn: (x.pyn && x.pyn !== "?") ? x.pyn : "----",
+            jpnHtml: window.prettifyJpnToHtml ? window.prettifyJpnToHtml(x.jpn ?? "") : ""
+          }));
+
+          const dt = Math.round(performance.now() - t0);
+          this.status = `「${this.word}」：${this.total}件（このページ ${this.items.length}件 / ${dt}ms）`;
+          this.lastInfo = new Date().toLocaleString();
+
+          // URLに反映
+          const url = new URL(location.href);
+          url.searchParams.set("word", this.word);
+          url.searchParams.set("option", this.option);
+          //url.searchParams.set("page", String(this.page));
+          url.searchParams.set("page", String(this.page - 1)); // 0始まりで保存
+          //history.replaceState(null, "", url.toString());
+          if (push){
+            history.pushState(
+              { word: this.word, option: this.option, page: this.page - 1 },
+              "",
+              url.toString()
+            );
+          } else {
+            history.replaceState(
+              { word: this.word, option: this.option, page: this.page - 1 },
+              "",
+              url.toString()
+            );
+          }
+        }catch(e){
+          this.error = `検索に失敗しました：${e?.message ?? e}`;
+        }finally{
+          this.loading = false;
+        }
+      }
+    }
+  }
+</script>
+
+</body>
+</html>
