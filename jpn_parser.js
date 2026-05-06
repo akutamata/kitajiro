@@ -36,7 +36,7 @@ function escapeHtml(s){
     .replaceAll("'", "&#39;");
 }
 
-// ピンイン声調変換（あなたの旧toneconv互換）
+// ピンイン声調変換
 function toneConv(str){
   const m = String(str).match(/(ang|eng|ing|ong|ai|an|ao|ei|en|er|ie|in|ng|ou|un|ve|a|e|i|u|o|v)[1-4]{1}/g);
   if (!m) return String(str);
@@ -49,7 +49,7 @@ function toneConv(str){
   return out;
 }
 
-// インライン記法 → HTML（旧 parse_markup_inline 相当）
+// インライン記法 → HTML
 // 注意：ここは「まず escapeHtml してから」記法だけ戻す
 function applyInlineMarkup(escaped){
   let s = escaped;
